@@ -30,8 +30,11 @@ class OcrController extends Controller
             $header = "क्रमांक\tग्रंथ-नाम\tकर्ता";
             $finalCsv = $header . "\n";
 
+            $count = 1;
             foreach ($request->file('images') as $image) {
                 try {
+
+                    Log::info("image count is : " . $count++);
                     // Save temp to public disk
                     $path = $image->store('ocr_uploads', 'public');
                     Log::info("Image saved to: $path");
@@ -51,21 +54,20 @@ class OcrController extends Controller
 
                     // Append the current image's CSV data to the final string, followed by a blank line
                     $finalCsv .= trim($csv) . "\n\n";
-
                 } catch (\Exception $e) {
                     Log::error("Error processing image " . $image->getClientOriginalName() . ": " . $e->getMessage());
                     // Decide whether to throw the exception or log it and continue
                     throw new \Exception("Failed to process image: " . $image->getClientOriginalName() . " - " . $e->getMessage());
                 }
             }
-            
+
             // Trim any extra blank lines from the end
             $finalCsv = trim($finalCsv);
 
             // Save to file in public disk
             $filePath = 'ocr_results/output.csv';
             Storage::disk('public')->put($filePath, $finalCsv);
-            
+
 
             return response()->download(Storage::disk('public')->path($filePath));
         } catch (\Exception $e) {
