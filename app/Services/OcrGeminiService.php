@@ -53,7 +53,7 @@ class OcrGeminiService
     /**
      * Clean and format extracted OCR text into a table using Gemini
      */
-    public function formatWithGemini(string $rawText): string
+    public function formatTableWithGemini(string $rawText): string
     {
         try {
             $prompt = "
@@ -134,7 +134,51 @@ Here is the raw OCR text:
                 throw new \Exception('Gemini API error: ' . $response->status() . ' - ' . $response->body());
             }
         } catch (\Exception $e) {
-            Log::error('Gemini error: ' . $e->getMessage());
+            Log::error('Gemini table formatting error: ' . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
+     * Clean and format extracted OCR text into a document using Gemini.
+     */
+    public function formatDocumentWithGemini(string $rawText): string
+    {
+        try {
+            $prompt = "
+            The following is text extracted from an image via OCR. It may contain errors,
+            unnecessary line breaks, and messy formatting. Please clean it up and
+            present it in a logical, easy-to-read document format. Correct any spelling
+            or grammatical errors without changing the original content's meaning.
+            Do not add any new information.
+
+            Here is the raw OCR text:
+            {$rawText}
+            ";
+
+            $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={$this->apiKey}";
+
+            $response = Http::withHeaders([
+                'Content-Type' => 'application/json',
+            ])->post($url, [
+                'contents' => [
+                    [
+                        'parts' => [
+                            ['text' => $prompt]
+                        ]
+                    ]
+                ]
+            ]);
+
+            if ($response->successful()) {
+                $data = $response->json();
+                return $data['candidates'][0]['content']['parts'][0]['text'] ?? 'Could not format document text.';
+            } else {
+                Log::error('Gemini API document formatting error: ' . $response->body());
+                throw new \Exception('Gemini API error: ' . $response->status() . ' - ' . $response->body());
+            }
+        } catch (\Exception $e) {
+            Log::error('Gemini document formatting error: ' . $e->getMessage());
             throw $e;
         }
     }

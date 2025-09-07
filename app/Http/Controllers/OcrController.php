@@ -17,57 +17,59 @@ class OcrController extends Controller
     }
 
     /**
-     * Handle bulk OCR for uploaded images
+     * Handle bulk OCR for uploaded images with format selection.
      */
     public function bulkOcr(Request $request)
     {
         try {
             $request->validate([
-                'images.*' => 'required|image|max:10240' // 10MB max
+                'images.*' => 'required|image|max:10240', // 10MB max
+                'output_format' => 'required|in:table,document',
             ]);
 
-            // Define the CSV header
-            $header = "क्रमांक\tग्रंथ-नाम\tकर्ता";
-            $finalCsv = $header . "\n";
+            $outputFormat = $request->input('output_format');
+            $finalOutput = '';
 
-            $count = 1;
+            // Define header for table format
+            if ($outputFormat === 'table') {
+                $finalOutput = "क्रमांक\tग्रंथ-नाम\tकर्ता\n";
+            }
+
             foreach ($request->file('images') as $image) {
                 try {
+                    Log::info("Processing image: " . $image->getClientOriginalName());
 
-                    Log::info("image count is : " . $count++);
                     // Save temp to public disk
                     $path = $image->store('ocr_uploads', 'public');
-                    Log::info("Image saved to: $path");
-
-                    // OCR with Vision API - use the correct storage path
                     $fullPath = Storage::disk('public')->path($path);
+
+                    // OCR with Vision API
                     $rawText = $this->ocrGemini->extractText($fullPath);
-                    Log::info("raw text are : ", [$rawText]);
-                    Log::info("OCR completed for: " . $image->getClientOriginalName());
 
-                    // Clean/format with Gemini
-                    $csv = $this->ocrGemini->formatWithGemini($rawText);
-                    Log::info("Gemini formatting completed for: " . $image->getClientOriginalName());
+                    // Process text based on format
+                    if ($outputFormat === 'table') {
+                        $formattedText = $this->ocrGemini->formatTableWithGemini($rawText);
+                        // Append to final output
+                        $finalOutput .= trim($formattedText) . "\n\n";
+                    } else { // document
+                        $formattedText = $this->ocrGemini->formatDocumentWithGemini($rawText);
+                        // Append to final output
+                        $finalOutput .= trim($formattedText) . "\n\n";
+                    }
 
-                    // Remove accidental headers if Gemini inserted them again
-                    $csv = preg_replace('/^.*क्रमांक.*$/m', '', $csv);
-
-                    // Append the current image's CSV data to the final string, followed by a blank line
-                    $finalCsv .= trim($csv) . "\n\n";
+                    // Clean up temp image
+                    Storage::disk('public')->delete($path);
                 } catch (\Exception $e) {
                     Log::error("Error processing image " . $image->getClientOriginalName() . ": " . $e->getMessage());
-                    // Decide whether to throw the exception or log it and continue
                     throw new \Exception("Failed to process image: " . $image->getClientOriginalName() . " - " . $e->getMessage());
                 }
             }
 
-            // Trim any extra blank lines from the end
-            $finalCsv = trim($finalCsv);
-
-            // Save to file in public disk
-            $filePath = 'ocr_results/output.csv';
-            Storage::disk('public')->put($filePath, $finalCsv);
-
+            // Trim any extra blank lines and save the final file
+            $finalOutput = trim($finalOutput);
+            $extension = ($outputFormat === 'table') ? 'csv' : 'txt';
+            $filePath = 'ocr_results/output.' . $extension;
+            Storage::disk('public')->put($filePath, $finalOutput);
 
             return response()->download(Storage::disk('public')->path($filePath));
         } catch (\Exception $e) {
