@@ -24,18 +24,22 @@ class OcrController extends Controller
         try {
             $request->validate([
                 'images.*' => 'required|image|max:10240', // 10MB max
-                'ocr_engine' => 'required|in:vision_and_gemini,full_gemini',
+                'ocr_engine' => 'required|in:vision_and_gemini,full_gemini,raw',
                 'output_format' => 'required|in:table,document',
             ]);
 
             $ocrEngine = $request->input('ocr_engine');
             $outputFormat = $request->input('output_format');
             $finalOutput = '';
+            $extension = 'txt'; // Default extension for raw text
 
-            // Define header for table format
-            if ($outputFormat === 'table') {
+            if ($ocrEngine !== 'raw' && $outputFormat === 'table') {
                 $finalOutput = "क्रमांक\tग्रंथ-नाम\tकर्ता\n";
+                $extension = 'csv';
             }
+
+            $totalImages = count($request->file('images'));
+            $processedCount = 0;
 
             foreach ($request->file('images') as $image) {
                 try {
@@ -44,21 +48,29 @@ class OcrController extends Controller
                     $fullPath = Storage::disk('public')->path($path);
 
                     if ($ocrEngine === 'vision_and_gemini') {
-                        // Original workflow: Vision API for OCR, then Gemini for formatting
                         $rawText = $this->ocrGemini->extractText($fullPath);
                         if ($outputFormat === 'table') {
                             $formattedText = $this->ocrGemini->formatTableWithGemini($rawText);
                         } else {
                             $formattedText = $this->ocrGemini->formatDocumentWithGemini($rawText);
                         }
-                    } else { // full_gemini
-                        // New workflow: Gemini for both OCR and formatting
+                    } elseif ($ocrEngine === 'full_gemini') {
                         $formattedText = $this->ocrGemini->fullGeminiOcrAndFormat($fullPath, $outputFormat);
+                    } else { // 'raw'
+                        $formattedText = $this->ocrGemini->extractText($fullPath);
+                        // For raw extraction, we don't need the header
+                        if ($outputFormat === 'table') {
+                            $finalOutput = '';
+                            Log::warning('Raw extraction selected, but table format requested. Defaulting to raw document format.');
+                        }
                     }
 
-                    // Append the result and clean up the temp image
                     $finalOutput .= trim($formattedText) . "\n\n";
                     Storage::disk('public')->delete($path);
+
+                    $processedCount++;
+                    // This can be used for real-time progress updates in a more advanced setup
+                    // $progress = ($processedCount / $totalImages) * 100;
 
                 } catch (\Exception $e) {
                     Log::error("Error processing image " . $image->getClientOriginalName() . ": " . $e->getMessage());
@@ -67,7 +79,6 @@ class OcrController extends Controller
             }
 
             $finalOutput = trim($finalOutput);
-            $extension = ($outputFormat === 'table') ? 'csv' : 'txt';
             $filePath = 'ocr_results/output.' . $extension;
             Storage::disk('public')->put($filePath, $finalOutput);
 

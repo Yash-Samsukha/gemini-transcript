@@ -17,7 +17,6 @@ class OcrGeminiService
         $this->vision = new ImageAnnotatorClient([
             'credentials' => storage_path('keys/google-credentials.json')
         ]);
-
         // Gemini API key
         $this->apiKey = getenv('GEMINI_API_KEY');
     }
@@ -255,12 +254,14 @@ I have a messy image with text. Please extract all the text from the image, clea
                         throw new \Exception('Failed to decode JSON from Gemini API: ' . json_last_error_msg());
                     }
 
+                    // Arrays for different numeral systems
                     $devanagariNumerals = ['०', '१', '२', '३', '४', '५', '६', '७', '८', '९'];
                     $gujaratiNumerals   = ['૦', '૧', '૨', '૩', '૪', '૫', '૬', '૭', '૮', '૯'];
                     $arabicNumerals     = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
                     $output = "";
                     foreach ($parsedData as $item) {
+                        // Combine all numeral arrays for conversion
                         $sankhya = str_replace(
                             array_merge($devanagariNumerals, $gujaratiNumerals),
                             $arabicNumerals,
