@@ -62,6 +62,15 @@
                 </div>
             </div>
 
+            <!-- OCR Engine Selection -->
+            <div class="space-y-2">
+                <label for="ocr_engine" class="block text-sm font-medium text-gray-700">Choose OCR Engine:</label>
+                <select id="ocr_engine" name="ocr_engine" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+                    <option value="vision_and_gemini">Google Vision + Gemini (Two-step)</option>
+                    <option value="full_gemini">Full Gemini AI (Single-step)</option>
+                </select>
+            </div>
+
             <!-- Format Selection -->
             <div class="space-y-2">
                 <label for="output_format" class="block text-sm font-medium text-gray-700">Choose Output Format:</label>
@@ -124,6 +133,7 @@
     const results = document.getElementById('results');
     const resultText = document.getElementById('resultText');
     const outputFormat = document.getElementById('output_format');
+    const ocrEngine = document.getElementById('ocr_engine');
 
     let selectedFiles = [];
 
@@ -227,7 +237,8 @@
             formData.append('images[]', file);
         });
 
-        // Add the output format to the form data
+        // Add the OCR engine and output format to the form data
+        formData.append('ocr_engine', ocrEngine.value);
         formData.append('output_format', outputFormat.value);
 
         try {

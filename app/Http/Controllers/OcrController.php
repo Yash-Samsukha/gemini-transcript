@@ -24,9 +24,11 @@ class OcrController extends Controller
         try {
             $request->validate([
                 'images.*' => 'required|image|max:10240', // 10MB max
+                'ocr_engine' => 'required|in:vision_and_gemini,full_gemini',
                 'output_format' => 'required|in:table,document',
             ]);
 
+            $ocrEngine = $request->input('ocr_engine');
             $outputFormat = $request->input('output_format');
             $finalOutput = '';
 
@@ -38,34 +40,32 @@ class OcrController extends Controller
             foreach ($request->file('images') as $image) {
                 try {
                     Log::info("Processing image: " . $image->getClientOriginalName());
-
-                    // Save temp to public disk
                     $path = $image->store('ocr_uploads', 'public');
                     $fullPath = Storage::disk('public')->path($path);
 
-                    // OCR with Vision API
-                    $rawText = $this->ocrGemini->extractText($fullPath);
-
-                    // Process text based on format
-                    if ($outputFormat === 'table') {
-                        $formattedText = $this->ocrGemini->formatTableWithGemini($rawText);
-                        // Append to final output
-                        $finalOutput .= trim($formattedText) . "\n\n";
-                    } else { // document
-                        $formattedText = $this->ocrGemini->formatDocumentWithGemini($rawText);
-                        // Append to final output
-                        $finalOutput .= trim($formattedText) . "\n\n";
+                    if ($ocrEngine === 'vision_and_gemini') {
+                        // Original workflow: Vision API for OCR, then Gemini for formatting
+                        $rawText = $this->ocrGemini->extractText($fullPath);
+                        if ($outputFormat === 'table') {
+                            $formattedText = $this->ocrGemini->formatTableWithGemini($rawText);
+                        } else {
+                            $formattedText = $this->ocrGemini->formatDocumentWithGemini($rawText);
+                        }
+                    } else { // full_gemini
+                        // New workflow: Gemini for both OCR and formatting
+                        $formattedText = $this->ocrGemini->fullGeminiOcrAndFormat($fullPath, $outputFormat);
                     }
 
-                    // Clean up temp image
+                    // Append the result and clean up the temp image
+                    $finalOutput .= trim($formattedText) . "\n\n";
                     Storage::disk('public')->delete($path);
+
                 } catch (\Exception $e) {
                     Log::error("Error processing image " . $image->getClientOriginalName() . ": " . $e->getMessage());
                     throw new \Exception("Failed to process image: " . $image->getClientOriginalName() . " - " . $e->getMessage());
                 }
             }
 
-            // Trim any extra blank lines and save the final file
             $finalOutput = trim($finalOutput);
             $extension = ($outputFormat === 'table') ? 'csv' : 'txt';
             $filePath = 'ocr_results/output.' . $extension;
