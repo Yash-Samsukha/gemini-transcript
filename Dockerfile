@@ -1,41 +1,51 @@
-# Use the official PHP image with Apache as the base
+# --- Stage 1: Build Stage for Dependencies ---
+FROM composer:2.7 as build
+
+# Set the working directory for the build stage
+WORKDIR /app
+
+# Copy composer files and install dependencies
+COPY composer.json composer.lock ./
+RUN composer install --no-dev --no-autoloader
+
+# --- Stage 2: Production Stage ---
 FROM php:8.2-apache
 
-# Set the working directory inside the container
+# Set working directory for the production stage
 WORKDIR /var/www/html
 
-# Install system dependencies needed for Laravel
+# Install system dependencies and PHP extensions
 RUN apt-get update && apt-get install -y \
     libpng-dev \
     libjpeg-dev \
     libfreetype6-dev \
-    zip \
-    unzip \
-    git \
-    libonig-dev \
     libzip-dev \
+    libonig-dev \
+    git \
     curl \
-    # Remove unnecessary files to keep the image size small
+    # Clean up APT cache to reduce image size
     --no-install-recommends && rm -rf /var/lib/apt/lists/*
 
-# Install necessary PHP extensions for a Laravel app
-RUN docker-php-ext-install pdo pdo_mysql gd exif opcache
-RUN docker-php-ext-configure gd --with-freetype --with-jpeg
-RUN docker-php-ext-install -j$(nproc) gd
+# Install required PHP extensions
+RUN docker-php-ext-install pdo pdo_mysql gd exif opcache zip mbstring
 
-# Install Composer globally
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+# Configure GD extension with FreeType and JPEG support
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install -j$(nproc) gd
 
-# Copy the entire Laravel application into the container
+# Copy Composer from the build stage
+COPY --from=build /usr/bin/composer /usr/bin/composer
+
+# Copy application files from your repository
 COPY . .
 
-# Run Composer to install PHP dependencies (without dev dependencies)
-RUN composer install --no-dev --optimize-autoloader
+# Copy the vendor directory from the build stage
+COPY --from=build /app/vendor /var/www/html/vendor
 
 # Give Apache ownership of the project directory for permissions
 RUN chown -R www-data:www-data /var/www/html
 
-# Configure Apache to use the public directory as the root
+# Set up Apache to use the 'public' directory as the web root
 RUN echo '<VirtualHost *:80>\n\
     DocumentRoot /var/www/html/public\n\
     <Directory /var/www/html/public>\n\
@@ -46,10 +56,9 @@ RUN echo '<VirtualHost *:80>\n\
     CustomLog ${APACHE_LOG_DIR}/access.log combined\n\
 </VirtualHost>' > /etc/apache2/sites-available/000-default.conf
 
-# Enable the Apache rewrite module
+# Enable Apache rewrite module
 RUN a2enmod rewrite
 
 # Expose port 80 and start Apache
 EXPOSE 80
-
 CMD ["apache2-foreground"]
