@@ -6,6 +6,8 @@ use Illuminate\Http\Request;
 use App\Services\OcrGeminiService;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
+use Exception;
 
 class OcrController extends Controller
 {
@@ -23,58 +25,71 @@ class OcrController extends Controller
     {
         try {
             $request->validate([
-                'images.*' => 'required|image|max:10240', // 10MB max
+                'images.*' => 'required|mimes:jpeg,png,jpg,gif,svg,pdf|max:10240',
                 'ocr_engine' => 'required|in:vision_and_gemini,full_gemini,raw',
                 'output_format' => 'required|in:table,document',
+                'prompt_type' => 'nullable|in:default,custom',
+                'custom_prompt' => [
+                    Rule::requiredIf($request->input('prompt_type') === 'custom' && $request->input('output_format') === 'document'),
+                    'string',
+                    'nullable',
+                    'max:150'
+                ],
+                'table_columns' => [
+                    Rule::requiredIf($request->input('prompt_type') === 'custom' && $request->input('output_format') === 'table'),
+                    'string',
+                    'nullable',
+                ],
             ]);
 
             $ocrEngine = $request->input('ocr_engine');
             $outputFormat = $request->input('output_format');
+            $promptType = $request->input('prompt_type');
+            $customPrompt = ($promptType === 'custom' && $outputFormat === 'document') ? $request->input('custom_prompt') : null;
+            $tableColumns = ($promptType === 'custom' && $outputFormat === 'table') ? $request->input('table_columns') : null;
+
             $finalOutput = '';
-            $extension = 'txt'; // Default extension for raw text
+            $extension = 'txt';
 
             if ($ocrEngine !== 'raw' && $outputFormat === 'table') {
-                $finalOutput = "क्रमांक\tग्रंथ-नाम\tकर्ता\n";
+                $columnHeaders = !empty($tableColumns) ? array_map('trim', explode(',', $tableColumns)) : ['क्रमांक', 'ग्रंथ-नाम', 'कर्ता'];
+                $finalOutput = implode("\t", $columnHeaders) . "\n";
                 $extension = 'csv';
             }
 
-            $totalImages = count($request->file('images'));
-            $processedCount = 0;
-
-            foreach ($request->file('images') as $image) {
+            foreach ($request->file('images') as $file) {
                 try {
-                    Log::info("Processing image: " . $image->getClientOriginalName());
-                    $path = $image->store('ocr_uploads', 'public');
+                    $path = $file->store('ocr_uploads', 'public');
                     $fullPath = Storage::disk('public')->path($path);
 
-                    if ($ocrEngine === 'vision_and_gemini') {
-                        $rawText = $this->ocrGemini->extractText($fullPath);
-                        if ($outputFormat === 'table') {
-                            $formattedText = $this->ocrGemini->formatTableWithGemini($rawText);
+                    if ($file->getClientMimeType() === 'application/pdf') {
+                        $processedText = $this->ocrGemini->processPdf($fullPath, $ocrEngine, $outputFormat, $customPrompt, $tableColumns);
+                        $finalOutput .= trim($processedText) . "\n\n";
+                    } else {
+                        if ($ocrEngine === 'vision_and_gemini') {
+                            $rawText = $this->ocrGemini->extractText($fullPath);
+                            if ($outputFormat === 'table') {
+                                $formattedText = $this->ocrGemini->formatTableWithGemini($rawText, $tableColumns);
+                            } else {
+                                $formattedText = $this->ocrGemini->formatDocumentWithGemini($rawText, $customPrompt);
+                            }
+                        } elseif ($ocrEngine === 'full_gemini') {
+                            $formattedText = $this->ocrGemini->fullGeminiOcrAndFormat($fullPath, $outputFormat, $customPrompt, $tableColumns);
                         } else {
-                            $formattedText = $this->ocrGemini->formatDocumentWithGemini($rawText);
+                            $formattedText = $this->ocrGemini->extractText($fullPath);
+                            if ($outputFormat === 'table') {
+                                $finalOutput = '';
+                                Log::warning('Raw extraction selected, but table format requested. Defaulting to raw document format.');
+                            }
                         }
-                    } elseif ($ocrEngine === 'full_gemini') {
-                        $formattedText = $this->ocrGemini->fullGeminiOcrAndFormat($fullPath, $outputFormat);
-                    } else { // 'raw'
-                        $formattedText = $this->ocrGemini->extractText($fullPath);
-                        // For raw extraction, we don't need the header
-                        if ($outputFormat === 'table') {
-                            $finalOutput = '';
-                            Log::warning('Raw extraction selected, but table format requested. Defaulting to raw document format.');
-                        }
+                        $finalOutput .= trim($formattedText) . "\n\n";
                     }
-
-                    $finalOutput .= trim($formattedText) . "\n\n";
+                    
                     Storage::disk('public')->delete($path);
 
-                    $processedCount++;
-                    // This can be used for real-time progress updates in a more advanced setup
-                    // $progress = ($processedCount / $totalImages) * 100;
-
-                } catch (\Exception $e) {
-                    Log::error("Error processing image " . $image->getClientOriginalName() . ": " . $e->getMessage());
-                    throw new \Exception("Failed to process image: " . $image->getClientOriginalName() . " - " . $e->getMessage());
+                } catch (Exception $e) {
+                    Log::error("Error processing file " . $file->getClientOriginalName() . ": " . $e->getMessage());
+                    throw new Exception("Failed to process file: " . $file->getClientOriginalName() . " - " . $e->getMessage());
                 }
             }
 
@@ -83,7 +98,7 @@ class OcrController extends Controller
             Storage::disk('public')->put($filePath, $finalOutput);
 
             return response()->download(Storage::disk('public')->path($filePath));
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::error("OCR processing error: " . $e->getMessage());
             return response()->json(['error' => $e->getMessage()], 500);
         }
