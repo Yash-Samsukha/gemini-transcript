@@ -6,8 +6,9 @@
     
     # Copy composer files and install dependencies
     COPY composer.json composer.lock ./
-    # Remove the --no-autoloader flag
-    RUN composer install --no-dev
+    # We run composer install without scripts here to avoid errors
+    # related to the missing artisan file in the build stage.
+    RUN composer install --no-dev --no-scripts
     
     # --- Stage 2: Production Stage ---
     FROM php:8.2-apache
@@ -42,6 +43,7 @@
     
     # Manually dump the autoloader after copying vendor files
     # This is the crucial step to fix your error
+    # We run it here because the artisan file is now available in the container.
     RUN composer dump-autoload --optimize --no-dev
     
     # Give Apache ownership of the project directory for permissions
