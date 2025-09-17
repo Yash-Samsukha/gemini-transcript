@@ -130,6 +130,10 @@
                             <p class="text-xl font-medium text-gray-900">Drop your files here</p>
                             <p class="text-base text-gray-500">पवित्र ग्रंथ या छवियों को यहां रखें</p>
                         </div>
+                        <p id="uploadLimitNotice" class="text-sm text-gray-600 mt-2">
+                            Upload limit: <strong>{{ env('MAX_UPLOAD_SIZE_MB', 20) }} MB</strong> per image or PDF
+                        </p>
+
                         <input type="file" id="fileInput" name="images[]" multiple accept="image/*" class="hidden">
                     </div>
                 </div>
@@ -150,7 +154,7 @@
                         <option value="document">Document (Plain Text)</option>
                     </select>
                 </div>
-                
+
                 <div id="customPromptSection" class="space-y-4">
                     <label for="prompt_type" class="block text-sm font-medium text-gray-700">Choose Prompt Type:</label>
                     <div class="flex items-center space-x-4">
@@ -258,7 +262,7 @@
             </div>
         </div>
     </div>
-    
+
     <script>
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('fileInput');
@@ -293,7 +297,7 @@
         const summarizeBtn = document.getElementById('summarizeBtn');
         const summaryResult = document.getElementById('summaryResult');
         const summaryText = document.getElementById('summaryText');
-        
+
         const MAX_PROMPT_WORDS = 150;
 
         let fileQueue = [];
@@ -385,6 +389,17 @@
                     alert('Please select only PDF files, as specified in the dropdown.');
                     return;
                 }
+                const MAX_SIZE_MB = window.MAX_UPLOAD_SIZE_MB || 20;
+
+                const maxBytes = MAX_SIZE_MB * 1024 * 1024;
+                const oversizedFiles = newFiles.filter(file => file.size > maxBytes);
+
+                if (oversizedFiles.length > 0) {
+                    const fileNames = oversizedFiles.map(f => f.name).join(', ');
+                    alert(`The following files are too large (limit is ${MAX_SIZE_MB} MB each):\n${fileNames}`);
+                    return;
+                }
+
 
                 newFiles.forEach(file => {
                     fileQueue.push(file);
@@ -394,7 +409,7 @@
                 fileInput.value = ''; // Reset the file input to allow re-selection of the same file
             }
         }
-        
+
         function containsOnlyImages() {
             return fileQueue.every(file => file.type.startsWith('image/'));
         }
@@ -514,7 +529,7 @@
                     submitBtn.classList.remove('hidden');
                 }
             }
-            
+
             if (!containsOnlyImages()) {
                 cropAllBtn.classList.add('hidden');
                 proceedBtn.classList.remove('hidden');
@@ -601,7 +616,7 @@
                     customFieldsAreValid = words.length > 0 && words.length <= MAX_PROMPT_WORDS;
                 }
             }
-            
+
             submitBtn.disabled = !hasFiles || !customFieldsAreValid;
         }
 
@@ -624,7 +639,7 @@
             input.addEventListener('change', checkFormValidity);
             input.addEventListener('input', checkFormValidity);
         });
-        
+
         customPromptInput.addEventListener('input', updateWordCount);
 
         uploadForm.addEventListener('submit', async (e) => {
@@ -680,9 +695,9 @@
                     resultText.textContent = `Your ${outputFormatValue === 'table' ? 'CSV' : 'text'} file is ready for download.`;
                     geminiSummarySection.classList.remove('hidden');
                     ocrTextResult = "Placeholder text from OCR process. This is where the actual text would go.";
-                    
-                    fileQueue = []; 
-                    finalFiles = []; 
+
+                    fileQueue = [];
+                    finalFiles = [];
                     updateUI();
                 } else {
                     const errorData = await response.json();
@@ -701,11 +716,11 @@
                 summarizeTextWithGemini(ocrTextResult);
             }
         });
-        
+
         ocrEngine.addEventListener('change', toggleCustomPromptVisibility);
         outputFormat.addEventListener('change', toggleCustomPromptVisibility);
         promptTypeRadios.forEach(radio => radio.addEventListener('change', toggleCustomPromptVisibility));
-        
+
         document.addEventListener('DOMContentLoaded', () => {
             checkFormValidity();
         });
