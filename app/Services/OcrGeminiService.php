@@ -62,8 +62,7 @@ class OcrGeminiService
      */
     public function formatTableWithGemini(string $rawText, string $tableColumns = null): string
     {
-        // Ensure GEMINI_API is set to the full endpoint, e.g.,
-        // https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent
+        // Ensure GEMINI_API is set to the full endpoint
         $url = env('GEMINI_API')."?key={$this->apiKey}";
 
         $maxRetries = 5;
@@ -111,10 +110,8 @@ Here is the raw OCR text:
                 $response = Http::withHeaders(['Content-Type' => 'application/json'])->post($url, [
                     'contents' => [['parts' => [['text' => $prompt]]]],
                     'generationConfig' => [
-                        // New, supported way to enforce JSON output (JSON Mode)
-                        'response_format' => [
-                            'type' => 'json_object',
-                        ],
+                        // Revert to simplified responseMimeType, as response_format also failed.
+                        'responseMimeType' => 'application/json',
                     ]
                 ]);
 
@@ -171,6 +168,7 @@ Here is the raw OCR text:
      */
     public function formatDocumentWithGemini(string $rawText, string $customPrompt = null): string
     {
+        // Use the env variable for consistency
         $url = env('GEMINI_API')."?key={$this->apiKey}";
 
         $maxRetries = 5;
@@ -250,9 +248,8 @@ I have an image of a list of books and their authors. Your task is to extract th
 {$jsonExample}
 ";
                     $generationConfig = [
-                        'response_format' => [
-                            'type' => 'json_object',
-                        ],
+                        // Revert to simplified responseMimeType, as response_format also failed.
+                        'responseMimeType' => 'application/json',
                     ];
                 } else { // document
                     $prompt = $customPrompt ?? "
