@@ -109,8 +109,8 @@ Here is the required JSON structure:
 
         while ($retries < $maxRetries) {
             try {
-                // *** REMOVED PROBLEMATIC GENERATION_CONFIG ***
-                $response = Http::withHeaders(['Content-Type' => 'application/json'])->post($url, [
+                // *** FIX: INCREASED TIMEOUT TO 90 SECONDS ***
+                $response = Http::timeout(90)->withHeaders(['Content-Type' => 'application/json'])->post($url, [
                     'contents' => [['parts' => [['text' => $prompt]]]],
                     // generationConfig block is intentionally omitted to prevent 400 error
                 ]);
@@ -183,7 +183,8 @@ Do not add any new information.
 Here is the raw OCR text:
 {$rawText}
 ";
-                $response = Http::withHeaders(['Content-Type' => 'application/json'])->post($url, [
+                // *** FIX: INCREASED TIMEOUT TO 90 SECONDS ***
+                $response = Http::timeout(90)->withHeaders(['Content-Type' => 'application/json'])->post($url, [
                     'contents' => [['parts' => [['text' => $prompt]]]]
                 ]);
 
@@ -253,7 +254,8 @@ I have a messy image with text. Please extract all the text from the image, clea
                     $generationConfig = null;
                 }
 
-                $response = Http::withHeaders(['Content-Type' => 'application/json'])->post($url, [
+                // *** FIX: INCREASED TIMEOUT TO 90 SECONDS ***
+                $response = Http::timeout(90)->withHeaders(['Content-Type' => 'application/json'])->post($url, [
                     'contents' => [
                         [
                             'parts' => [
@@ -265,7 +267,6 @@ I have a messy image with text. Please extract all the text from the image, clea
                             ]
                         ]
                     ],
-                    // *** REMOVED PROBLEMATIC GENERATION_CONFIG ***
                     'generationConfig' => $generationConfig,
                 ]);
 
