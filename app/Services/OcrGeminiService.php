@@ -62,8 +62,8 @@ class OcrGeminiService
      */
     public function formatTableWithGemini(string $rawText, string $tableColumns = null): string
     {
-        $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={$this->apiKey}";
-        
+        $url = env('GEMINI_API')."?key={$this->apiKey}";
+
         $maxRetries = 5;
         $retries = 0;
         $delay = 1;
@@ -93,13 +93,13 @@ Follow these steps and rules precisely:
 Here is the raw OCR text:
 {$rawText}
 ";
-                
+
         while ($retries < $maxRetries) {
             try {
                 $response = Http::withHeaders(['Content-Type' => 'application/json'])->post($url, [
                     'contents' => [['parts' => [['text' => $prompt]]]],
                     'generationConfig' => [
-                        'responseMimeType' => 'application/json', 
+                        'responseMimeType' => 'application/json',
                         'responseSchema' => [
                             'type' => 'ARRAY',
                             'items' => [
@@ -119,7 +119,7 @@ Here is the raw OCR text:
                     if (json_last_error() !== JSON_ERROR_NONE) {
                         throw new Exception('Failed to decode JSON from Gemini API: ' . json_last_error_msg());
                     }
-                    
+
                     $output = "";
                     foreach ($parsedData as $item) {
                         $row = [];
@@ -156,7 +156,7 @@ Here is the raw OCR text:
     public function formatDocumentWithGemini(string $rawText, string $customPrompt = null): string
     {
         $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={$this->apiKey}";
-        
+
         $maxRetries = 5;
         $retries = 0;
         $delay = 1;
@@ -197,7 +197,7 @@ Here is the raw OCR text:
                 $delay *= 2;
             }
         }
-        
+
         throw new Exception('Failed to get a response from Gemini API after multiple retries.');
     }
 
@@ -217,10 +217,10 @@ Here is the raw OCR text:
             $safeName = str_replace(' ', '_', strtolower(trim($name)));
             $columnProperties[$safeName] = ['type' => 'STRING'];
         }
-        
+
         $propertyOrdering = array_keys($columnProperties);
         $requiredProperties = $propertyOrdering;
-        
+
         while ($retries < $maxRetries) {
             try {
                 $imageContent = base64_encode(file_get_contents($imagePath));
@@ -269,7 +269,7 @@ I have a messy image with text. Please extract all the text from the image, clea
                         if (json_last_error() !== JSON_ERROR_NONE) {
                             throw new Exception('Failed to decode JSON from Gemini API: ' . json_last_error_msg());
                         }
-                        
+
                         $output = implode("\t", $columnNames) . "\n";
                         foreach ($parsedData as $item) {
                             $row = [];
