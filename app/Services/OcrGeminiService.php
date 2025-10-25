@@ -62,6 +62,8 @@ class OcrGeminiService
      */
     public function formatTableWithGemini(string $rawText, string $tableColumns = null): string
     {
+        // Ensure GEMINI_API is set to the full endpoint, e.g.,
+        // https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent
         $url = env('GEMINI_API')."?key={$this->apiKey}";
 
         $maxRetries = 5;
@@ -69,14 +71,21 @@ class OcrGeminiService
         $delay = 1;
 
         $columnNames = !empty($tableColumns) ? array_map('trim', explode(',', $tableColumns)) : ['sankhya', 'granth_naam', 'karta'];
-        $columnProperties = [];
-        foreach ($columnNames as $name) {
-            $safeName = str_replace(' ', '_', strtolower(trim($name)));
-            $columnProperties[$safeName] = ['type' => 'STRING'];
-        }
 
-        $propertyOrdering = array_keys($columnProperties);
-        $requiredProperties = $propertyOrdering;
+        // Build an example JSON array to include in the prompt for explicit schema guidance
+        $jsonExample = json_encode([
+            [
+                'sankhya' => '(extracted number, e.g., १६१)',
+                'granth_naam' => '(extracted book name)',
+                'karta' => '(extracted author name or empty string)'
+            ],
+            [
+                'sankhya' => '...',
+                'granth_naam' => '...',
+                'karta' => '...'
+            ]
+        ], JSON_PRETTY_PRINT);
+
 
         $prompt = "
 I have a list of books and their authors extracted via OCR. The text is messy and the authors might be on a different line or not present.
@@ -88,7 +97,10 @@ Follow these steps and rules precisely:
 3. For each `ग्रन्थ-नाम`, search for its corresponding `कर्ता` (author's name) on the same line or any following lines until the next `संख्या`.
 4. If a `कर्ता` is found for a specific `ग्रन्थ-नाम`, link them together.
 5. If no `कर्ता` is found for an entry, leave the `karta` field as an empty string.
-6. The final output must be a clean, JSON array where each object has three keys: `sankhya`, `granth_naam`, and `karta`.
+6. The final output **MUST be a clean, parsable JSON array** with the exact keys: `sankhya`, `granth_naam`, and `karta`.
+
+**The entire response MUST strictly follow this example structure:**
+{$jsonExample}
 
 Here is the raw OCR text:
 {$rawText}
@@ -99,25 +111,28 @@ Here is the raw OCR text:
                 $response = Http::withHeaders(['Content-Type' => 'application/json'])->post($url, [
                     'contents' => [['parts' => [['text' => $prompt]]]],
                     'generationConfig' => [
-                        'responseMimeType' => 'application/json',
-                        'responseSchema' => [
-                            'type' => 'ARRAY',
-                            'items' => [
-                                'type' => 'OBJECT',
-                                'properties' => $columnProperties,
-                                'required' => $requiredProperties,
-                                'propertyOrdering' => $propertyOrdering
-                            ]
-                        ]
+                        // New, supported way to enforce JSON output (JSON Mode)
+                        'response_format' => [
+                            'type' => 'json_object',
+                        ],
                     ]
                 ]);
 
                 if ($response->successful()) {
                     $data = $response->json();
+                    // Extract the text part which will now be the JSON string
                     $result = $data['candidates'][0]['content']['parts'][0]['text'] ?? 'No response';
                     $parsedData = json_decode($result, true);
+
+                    // The model might wrap the JSON in markdown code fences,
+                    // so we attempt to strip them before decoding if the first decode fails.
                     if (json_last_error() !== JSON_ERROR_NONE) {
-                        throw new Exception('Failed to decode JSON from Gemini API: ' . json_last_error_msg());
+                        $cleanedResult = preg_replace('/^```json\s*|(?:\s*```)?$/i', '', $result);
+                        $parsedData = json_decode($cleanedResult, true);
+                    }
+
+                    if (json_last_error() !== JSON_ERROR_NONE) {
+                        throw new Exception('Failed to decode JSON from Gemini API: ' . json_last_error_msg() . ' (Raw: ' . $result . ')');
                     }
 
                     $output = "";
@@ -125,6 +140,7 @@ Here is the raw OCR text:
                         $row = [];
                         foreach ($columnNames as $name) {
                             $safeName = str_replace(' ', '_', strtolower(trim($name)));
+                            // Use the column name directly, as the model should return these keys
                             $row[] = $item[$safeName] ?? '';
                         }
                         $output .= implode("\t", $row) . "\n";
@@ -155,7 +171,7 @@ Here is the raw OCR text:
      */
     public function formatDocumentWithGemini(string $rawText, string $customPrompt = null): string
     {
-        $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={$this->apiKey}";
+        $url = env('GEMINI_API')."?key={$this->apiKey}";
 
         $maxRetries = 5;
         $retries = 0;
@@ -175,6 +191,7 @@ Here is the raw OCR text:
 ";
                 $response = Http::withHeaders(['Content-Type' => 'application/json'])->post($url, [
                     'contents' => [['parts' => [['text' => $prompt]]]]
+                    // No generationConfig is needed for unstructured text output
                 ]);
 
                 if ($response->successful()) {
@@ -206,20 +223,20 @@ Here is the raw OCR text:
      */
     public function fullGeminiOcrAndFormat(string $imagePath, string $outputFormat, string $customPrompt = null, string $tableColumns = null): string
     {
-        $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={$this->apiKey}";
+        $url = env('GEMINI_API')."?key={$this->apiKey}";
         $maxRetries = 5;
         $retries = 0;
         $delay = 1;
 
         $columnNames = !empty($tableColumns) ? array_map('trim', explode(',', $tableColumns)) : ['sankhya', 'granth_naam', 'karta'];
-        $columnProperties = [];
-        foreach ($columnNames as $name) {
-            $safeName = str_replace(' ', '_', strtolower(trim($name)));
-            $columnProperties[$safeName] = ['type' => 'STRING'];
-        }
 
-        $propertyOrdering = array_keys($columnProperties);
-        $requiredProperties = $propertyOrdering;
+        $jsonExample = json_encode([
+            [
+                'sankhya' => '(extracted number)',
+                'granth_naam' => '(extracted book name)',
+                'karta' => '(extracted author name or empty string)'
+            ]
+        ], JSON_PRETTY_PRINT);
 
         while ($retries < $maxRetries) {
             try {
@@ -227,12 +244,21 @@ Here is the raw OCR text:
 
                 if ($outputFormat === 'table') {
                     $prompt = "
-I have an image of a list of books and their authors. Your task is to extract the text and convert it into a clean, JSON array with the following keys: " . implode(', ', $columnNames) . ".
+I have an image of a list of books and their authors. Your task is to extract the text and convert it into a clean, JSON array with the exact keys: " . implode(', ', $columnNames) . ".
+
+**The entire response MUST be a single JSON array that strictly follows this example structure:**
+{$jsonExample}
 ";
+                    $generationConfig = [
+                        'response_format' => [
+                            'type' => 'json_object',
+                        ],
+                    ];
                 } else { // document
                     $prompt = $customPrompt ?? "
 I have a messy image with text. Please extract all the text from the image, clean it up, correct any misspellings, and format it into a readable document. Maintain paragraph breaks and line breaks where appropriate. Do not add any new content or summaries.
 ";
+                    $generationConfig = null;
                 }
 
                 $response = Http::withHeaders(['Content-Type' => 'application/json'])->post($url, [
@@ -247,27 +273,25 @@ I have a messy image with text. Please extract all the text from the image, clea
                             ]
                         ]
                     ],
-                    'generationConfig' => [
-                        'responseMimeType' => 'application/json',
-                        'responseSchema' => ($outputFormat === 'table') ? [
-                            'type' => 'ARRAY',
-                            'items' => [
-                                'type' => 'OBJECT',
-                                'properties' => $columnProperties,
-                                'required' => $requiredProperties,
-                                'propertyOrdering' => $propertyOrdering
-                            ]
-                        ] : null
-                    ]
+                    'generationConfig' => $generationConfig,
                 ]);
 
                 if ($response->successful()) {
                     $data = $response->json();
                     $result = $data['candidates'][0]['content']['parts'][0]['text'] ?? '';
+
                     if ($outputFormat === 'table') {
                         $parsedData = json_decode($result, true);
+
+                        // The model might wrap the JSON in markdown code fences,
+                        // so we attempt to strip them before decoding if the first decode fails.
                         if (json_last_error() !== JSON_ERROR_NONE) {
-                            throw new Exception('Failed to decode JSON from Gemini API: ' . json_last_error_msg());
+                            $cleanedResult = preg_replace('/^```json\s*|(?:\s*```)?$/i', '', $result);
+                            $parsedData = json_decode($cleanedResult, true);
+                        }
+
+                        if (json_last_error() !== JSON_ERROR_NONE) {
+                            throw new Exception('Failed to decode JSON from Gemini API: ' . json_last_error_msg() . ' (Raw: ' . $result . ')');
                         }
 
                         $output = implode("\t", $columnNames) . "\n";
